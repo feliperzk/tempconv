@@ -2,9 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { convert } = require('./tempconv');
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} !== ${expected}`);
+const cli = (...args) => spawnSync(process.execPath, [require.resolve('./tempconv'), ...args], { encoding: 'utf8' });
 
 test('converte nos 6 sentidos', () => {
   [
@@ -31,12 +33,32 @@ test('zero absoluto: abaixo do limite é rejeitado', () => {
     .forEach(([val, from]) => assert.throws(() => convert(val, from, 'K'), RangeError));
 });
 
-test('unidades inválidas', () => {
-  assert.throws(() => convert(1, 'X', 'C'), RangeError);
-  assert.throws(() => convert(1, 'C', 'X'), RangeError);
-  assert.throws(() => convert(1, 'c', 'f'), RangeError);
+test('unidades inválidas, inclusive não-strings (sem coerção)', () => {
+  ['X', 'c', ['C'], null, undefined, 1].forEach((unit) => {
+    assert.throws(() => convert(1, unit, 'C'), RangeError);
+    assert.throws(() => convert(1, 'C', unit), RangeError);
+  });
 });
 
 test('valor não finito é rejeitado', () => {
   assert.throws(() => convert(NaN, 'C', 'F'), TypeError);
+});
+
+test('overflow do resultado é rejeitado', () => {
+  assert.throws(() => convert(1e308, 'C', 'F'), RangeError);
+});
+
+test('CLI: sucesso imprime resultado e sai com 0', () => {
+  const { status, stdout } = cli('100', 'C', 'F');
+  assert.equal(status, 0);
+  assert.equal(stdout, '212.00 F\n');
+});
+
+test('CLI: entrada inválida sai com 1 e escreve em stderr', () => {
+  [['-300', 'C', 'F'], ['10', 'C', 'X'], ['abc', 'C', 'F'], ['10', 'C'], []].forEach((args) => {
+    const { status, stdout, stderr } = cli(...args);
+    assert.equal(status, 1, `args: ${args}`);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^Erro: /);
+  });
 });
